@@ -18,10 +18,10 @@ ENV/
 env.bak/
 venv.bak/
 
+
 # Data
-data/*
-!data/.gitkeep
-!data/*.csv
+data/*.csv
+data/**/*.csv
 
 
 
