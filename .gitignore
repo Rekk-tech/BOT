@@ -22,6 +22,8 @@ venv.bak/
 # Data
 data/*.csv
 data/**/*.csv
+!data/**/.gitkeep
+
 
 
 
