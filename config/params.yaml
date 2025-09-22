@@ -1,0 +1,51 @@
+# =========================
+# Project parameters
+# =========================
+seed: 42
+
+paths:
+  raw_csv: data/raw/Fraud.csv
+  interim_clean_csv: data/interim/clean_encoded.csv
+  features_csv: data/processed/features.csv
+  splits:
+    train_csv: data/processed/train.csv
+    val_csv:   data/processed/val.csv
+    test_csv:  data/processed/test.csv
+  model_path: models/fraud_xgb.pkl
+
+split:
+  test_size: 0.20
+  val_size_from_train: 0.50        # 50% của phần tạm -> val
+  stratify: true
+  random_state: 42
+
+encoding:
+  one_hot:
+    column: type
+    drop_first: true
+    expected_categories: [CASH_IN, CASH_OUT, DEBIT, PAYMENT, TRANSFER]
+
+features:
+  make_delta: true
+  make_zero_flags: true
+  make_ratios: true
+  make_net_mismatch: true
+
+training:
+  algorithm: xgboost
+  params:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    tree_method: hist
+    n_jobs: -1
+  imbalance:
+    use_scale_pos_weight: true
+
+inference:
+  threshold: 0.80
+
+api:
+  url: http://localhost:8000
