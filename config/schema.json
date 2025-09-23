@@ -1,9 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/fraud-transaction.schema.json",
   "title": "FraudTransaction",
   "type": "object",
-  "additionalProperties": false,
   "properties": {
     "step":            { "type": "integer", "minimum": 0 },
     "type":            { "type": "string", "enum": ["CASH_IN","CASH_OUT","DEBIT","PAYMENT","TRANSFER"] },
@@ -14,35 +12,12 @@
     "nameDest":        { "type": ["string","null"] },
     "oldbalanceDest":  { "type": "number",  "minimum": 0 },
     "newbalanceDest":  { "type": "number",  "minimum": 0 },
-    "isFlaggedFraud":  { "type": "integer", "enum": [0,1] },
-    "isFraud":         { "type": ["integer","null"], "enum": [0,1,null] }
+    "isFlaggedFraud":  { "type": "integer", "enum": [0,1] }
   },
   "required": [
     "step","type","amount",
     "oldbalanceOrg","newbalanceOrg",
     "oldbalanceDest","newbalanceDest",
     "isFlaggedFraud"
-  ],
-  "examples": [
-    {
-      "step": 500,
-      "type": "TRANSFER",
-      "amount": 200000,
-      "nameOrig": "C12345",
-      "oldbalanceOrg": 0,
-      "newbalanceOrg": 0,
-      "nameDest": "M98765",
-      "oldbalanceDest": 0,
-      "newbalanceDest": 0,
-      "isFlaggedFraud": 0,
-      "isFraud": 1
-    }
-  ],
-  "definitions": {
-    "CSVFile": {
-      "type": "array",
-      "items": { "$ref": "#" },
-      "minItems": 1
-    }
-  }
+  ]
 }
