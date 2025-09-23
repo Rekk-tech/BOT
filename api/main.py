@@ -175,14 +175,23 @@ def preprocess_transactions(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, List[st
     warnings = []
 
     # Tính toán đặc trưng 'diff_new_old_origin'
-    df["diff_new_old_origin"] = df["newbalanceOrg"] - df["oldbalanceOrg"]
+    if "newbalanceOrg" in df.columns and "oldbalanceOrg" in df.columns:
+        df["diff_new_old_origin"] = df["newbalanceOrg"] - df["oldbalanceOrg"]
+    else:
+        df["diff_new_old_origin"] = 0
+        warnings.append("Missing columns 'newbalanceOrg' or 'oldbalanceOrg', filled 'diff_new_old_origin' with 0")
 
     # One-hot encode transaction types
-    type_dummies = pd.get_dummies(df["type"], prefix="type")
-    for col in ["type_PAYMENT", "type_TRANSFER", "type_DEBIT", "type_CASH_IN"]:
-        if col not in type_dummies.columns:
-            type_dummies[col] = 0
-    df = pd.concat([df.drop(columns=["type"]), type_dummies], axis=1)
+    if "type" in df.columns:
+        type_dummies = pd.get_dummies(df["type"], prefix="type")
+        for col in ["type_PAYMENT", "type_TRANSFER", "type_DEBIT", "type_CASH_IN"]:
+            if col not in type_dummies.columns:
+                type_dummies[col] = 0
+        df = pd.concat([df.drop(columns=["type"]), type_dummies], axis=1)
+    else:
+        for col in ["type_PAYMENT", "type_TRANSFER", "type_DEBIT", "type_CASH_IN"]:
+            df[col] = 0
+        warnings.append("Missing column 'type', filled one-hot encoded features with 0")
 
     # Đảm bảo tất cả các đặc trưng mong đợi đều tồn tại
     for col in EXPECTED_FEATURES:
@@ -254,16 +263,22 @@ async def health_check():
         try:
             # Test model prediction with dummy data
             dummy_data = pd.DataFrame([{
-                'step': 1, 'amount': 100, 'oldbalanceOrg': 1000, 'newbalanceOrg': 900,
-                'oldbalanceDest': 0, 'newbalanceDest': 100, 'isFlaggedFraud': 0,
-                'type_CASH_OUT': 0, 'type_DEBIT': 0, 'type_PAYMENT': 1, 'type_TRANSFER': 0,
-                'delta_org': 100, 'delta_dest': 100, 'zero_org_bal': 0, 'zero_dest_bal': 1,
-                'ratio_org': 0.1, 'ratio_dest': 100, 'net_mismatch': 0
+            'step': 1,
+            'amount': 100,
+            'oldbalanceOrg': 1000,
+            'newbalanceOrg': 900,
+            'oldbalanceDest': 0,
+            'newbalanceDest': 100,
+            'type': 'PAYMENT'
             }])
             
-            _ = MODEL.predict_proba(dummy_data)
+             # Preprocess dummy data
+            X, _ = preprocess_transactions(dummy_data)
+
+            # Test prediction
+            _ = MODEL.predict_proba(X)
             status = "healthy"
-            
+
         except Exception as e:
             logger.error(f"Health check model test failed: {str(e)}")
             status = "degraded"
