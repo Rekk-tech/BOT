@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # ========= Config =========
 load_dotenv()
-MODEL_PATH = os.getenv("MODEL_PATH", "models/fraud_xgb.pkl")
+MODEL_PATH = os.getenv("MODEL_PATH", "models\random_forest_model.pkl")
 THRESHOLD = float(os.getenv("THRESHOLD", "0.80"))
 LOG_PREDICTIONS = os.getenv("LOG_PREDICTIONS", "true").lower() == "true"
 API_VERSION = "2.1.0"
@@ -35,16 +35,8 @@ TXN_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
 
 # Feature list (must match training features)
 EXPECTED_FEATURES = [
-    "step", "amount",
-    "oldbalanceOrg", "newbalanceOrg",
-    "oldbalanceDest", "newbalanceDest",
-    "isFlaggedFraud",
-    # one-hot encoded transaction types
-    "type_CASH_OUT", "type_DEBIT", "type_PAYMENT", "type_TRANSFER",
-    # engineered features
-    "delta_org", "delta_dest",
-    "zero_org_bal", "zero_dest_bal",
-    "ratio_org", "ratio_dest", "net_mismatch",
+    "step", "type_PAYMENT", "type_TRANSFER", "type_DEBIT", "type_CASH_IN",
+    "amount", "diff_new_old_origin"
 ]
 
 # Global variables
@@ -56,11 +48,10 @@ def load_model():
     """Load the ML model with proper error handling"""
     global MODEL, THRESHOLD
     try:
-        obj = joblib.load(MODEL_PATH)
-        MODEL = obj.get("model", obj)
-        THRESHOLD = float(obj.get("threshold", THRESHOLD))
+        # Tải trực tiếp mô hình
+        MODEL = joblib.load(MODEL_PATH)
         logger.info(f"Model loaded successfully from {MODEL_PATH}")
-        logger.info(f"Using threshold: {THRESHOLD}")
+        logger.info(f"Using default threshold: {THRESHOLD}")
         return True
     except FileNotFoundError:
         logger.error(f"Model file not found at {MODEL_PATH}")
@@ -68,7 +59,7 @@ def load_model():
     except Exception as e:
         logger.error(f"Failed to load model from {MODEL_PATH}: {str(e)}")
         return False
-
+    
 # ========= FastAPI App Setup =========
 app = FastAPI(
     title="Fraud Detection API",
@@ -177,59 +168,31 @@ def validate_transaction_logic(df: pd.DataFrame) -> List[str]:
 
 def preprocess_transactions(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, List[str]]:
     """
-    Enhanced preprocessing with validation and feature engineering
+    Preprocess transactions to match model's expected features.
     Returns: (processed_df, warnings)
     """
     df = df_raw.copy()
     warnings = []
-    
-    # Validate business logic
-    logic_warnings = validate_transaction_logic(df)
-    warnings.extend(logic_warnings)
-    
+
+    # Tính toán đặc trưng 'diff_new_old_origin'
+    df["diff_new_old_origin"] = df["newbalanceOrg"] - df["oldbalanceOrg"]
+
     # One-hot encode transaction types
     type_dummies = pd.get_dummies(df["type"], prefix="type")
-    # Ensure all expected type columns exist
-    for col in ["type_CASH_OUT", "type_DEBIT", "type_PAYMENT", "type_TRANSFER"]:
+    for col in ["type_PAYMENT", "type_TRANSFER", "type_DEBIT", "type_CASH_IN"]:
         if col not in type_dummies.columns:
             type_dummies[col] = 0
-    
     df = pd.concat([df.drop(columns=["type"]), type_dummies], axis=1)
 
-    # Enhanced feature engineering
-    df["delta_org"] = df["oldbalanceOrg"] - df["newbalanceOrg"]
-    df["delta_dest"] = df["newbalanceDest"] - df["oldbalanceDest"]
-    df["zero_org_bal"] = (df["oldbalanceOrg"] == 0).astype(int)
-    df["zero_dest_bal"] = (df["oldbalanceDest"] == 0).astype(int)
-    
-    # Safe ratio calculations with small epsilon
-    epsilon = 1e-6
-    df["ratio_org"] = df["amount"] / (df["oldbalanceOrg"].abs() + epsilon)
-    df["ratio_dest"] = df["amount"] / (df["oldbalanceDest"].abs() + epsilon)
-    
-    # Network mismatch detection
-    df["net_mismatch"] = ((df["delta_org"] - df["delta_dest"]).abs() > 1e-3).astype(int)
-    
-    # Handle infinite values
-    df = df.replace([np.inf, -np.inf], 0)
-    
-    # Ensure all expected features exist
+    # Đảm bảo tất cả các đặc trưng mong đợi đều tồn tại
     for col in EXPECTED_FEATURES:
         if col not in df.columns:
             df[col] = 0
             warnings.append(f"Missing feature '{col}' filled with 0")
 
-    # Select and order features correctly
-    try:
-        df = df[EXPECTED_FEATURES]
-    except KeyError as e:
-        missing_cols = set(EXPECTED_FEATURES) - set(df.columns)
-        warnings.append(f"Missing columns: {missing_cols}")
-        # Add missing columns with zeros
-        for col in missing_cols:
-            df[col] = 0
-        df = df[EXPECTED_FEATURES]
-    
+    # Chỉ giữ lại các cột trong EXPECTED_FEATURES
+    df = df[EXPECTED_FEATURES]
+
     return df, warnings
 
 def get_risk_level(score: float) -> str:
