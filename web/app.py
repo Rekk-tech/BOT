@@ -10,6 +10,82 @@ from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, List, Optional
 
+
+# ================== Gemini Chatbot (models/gemini-2.5-flash) ==================
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
+_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
+_gemini_model = None
+_gemini_err = None
+
+if _GEMINI_KEY:
+    try:
+        # SDK v1 mặc định dùng API v1; không cần v1beta
+        genai.configure(api_key=_GEMINI_KEY)
+        # Khóa model theo yêu cầu
+        _gemini_model = genai.GenerativeModel("models/gemini-2.5-flash")
+    except Exception as e:
+        _gemini_err = f"⚠️ Lỗi khởi tạo Gemini: {e}"
+else:
+    _gemini_err = "⚠️ GEMINI_API_KEY chưa được cấu hình trong .env"
+
+def ensure_gchat(system_prompt: str = ""):
+    """
+    Tạo (hoặc lấy) phiên chat lưu trong st.session_state.
+    Có thể truyền system_prompt để đặt bối cảnh.
+    """
+    if _gemini_model is None:
+        return None, (_gemini_err or "⚠️ Gemini chưa sẵn sàng.")
+    if "g_chat" not in st.session_state:
+        st.session_state.g_chat = _gemini_model.start_chat(history=[
+            {"role": "user",  "parts": [system_prompt or "You are a helpful assistant."]},
+            {"role": "model", "parts": ["Okay, I'm ready."]},
+        ])
+    return st.session_state.g_chat, None
+
+def _extract_text_from_any(resp) -> str:
+    """Lấy text từ mọi dạng chunk/response của google-generativeai."""
+    # Trường hợp phổ biến: có thuộc tính .text
+    if hasattr(resp, "text") and resp.text:
+        return resp.text
+    # Trường hợp có candidates -> content.parts
+    try:
+        cands = getattr(resp, "candidates", None) or []
+        if cands:
+            content = getattr(cands[0], "content", None)
+            if content and getattr(content, "parts", None):
+                return "".join([getattr(p, "text", "") for p in content.parts if getattr(p, "text", "")])
+    except Exception:
+        pass
+    # Fallback
+    return str(resp) if resp is not None else ""
+
+def stream_gemini_reply(chat, user_text: str) -> str:
+    """
+    Gửi tin nhắn và stream câu trả lời theo từng chunk (render mượt).
+    Trả về toàn bộ văn bản trả lời.
+    """
+    placeholder = st.empty()
+    acc = []
+    try:
+        for ev in chat.send_message(user_text, stream=True):
+            chunk = _extract_text_from_any(ev)
+            if chunk:
+                acc.append(chunk)
+                placeholder.markdown("".join(acc))
+        return "".join(acc) if acc else ""
+    except Exception as e:
+        return f"⚠️ Lỗi gọi Gemini: {e}"
+# ============================================================================ #
+
+
+
+
+
+
 # ================== Config ==================
 DEFAULT_API_URL = "http://localhost:8000"
 API_URL = os.getenv("API_URL", DEFAULT_API_URL)
@@ -218,11 +294,12 @@ def create_risk_level_pie_chart(risk_levels: List[str]) -> go.Figure:
     return fig
 
 # ================== Main Tabs ==================
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔍 Single Transaction", 
     "📦 Batch Processing", 
     "📊 Analytics Dashboard",
-    "📋 Transaction Builder"
+    "📋 Transaction Builder",
+    "💬 Chatbot Assistant"
 ])
 
 # ================== Tab 1: Single Transaction ==================
@@ -843,6 +920,88 @@ with tab4:
                 
             except Exception as e:
                 st.error(f"❌ Batch testing failed: {str(e)}")
+
+
+
+
+# =============== Tab 5: Chatbot Assistant ===============
+with tab5:
+    st.subheader("💬 AI Chatbot Assistant (Gemini)")
+    st.caption("Chat trợ lý tích hợp — dùng model: **models/gemini-2.5-flash**")
+
+    # ⚙️ Cấu hình nhỏ cho chatbot
+    with st.expander("⚙️ Chat Settings", expanded=False):
+        system_prompt = st.text_area(
+            "System prompt (optional)",
+            value=(
+            "You are an AI assistant for a Fraud Detection Dashboard and API project. "
+            "- Explain fraud detection concepts: dataset fields, preprocessing, feature engineering, model training, evaluation, threshold tuning, API usage. "
+            "- Help users understand dashboard modules: Single Transaction, Batch Processing, Analytics, Transaction Builder, Chatbot. "
+            "- Provide concise, clear, practical answers. "
+            "- Stay focused on the project unless asked otherwise."
+        ),
+            height=80,
+        )
+
+        col_set1, col_set2 = st.columns([1,1])
+        with col_set1:
+            new_chat = st.button("🧹 New Chat (clear history)", use_container_width=True)
+        with col_set2:
+            show_model = st.button("🔍 Show Current Model", use_container_width=True)
+
+    if new_chat and "g_chat" in st.session_state:
+        del st.session_state["g_chat"]
+        st.success("Đã tạo phiên chat mới.")
+
+    chat, err = ensure_gchat(system_prompt)
+    if err:
+        st.warning(err)
+
+    if show_model:
+        st.info(f"Model: **{getattr(_gemini_model, 'model_name', 'models/gemini-2.5-flash')}**")
+
+    # 🗂️ Lịch sử hội thoại
+    st.markdown("#### Conversation")
+    if chat is not None and getattr(chat, "history", None):
+        for content in chat.history:
+            # content là đối tượng Content (không phải dict)
+            role = getattr(content, "role", "model")
+            parts = getattr(content, "parts", []) or []
+            texts = []
+            for part in parts:
+                t = getattr(part, "text", None)
+                if t:
+                    texts.append(t)
+            text = "".join(texts).strip()
+            if not text:
+                continue
+            if role == "user":
+                st.markdown(f"**👤 Bạn:** {text}")
+            else:
+                st.markdown(f"**🤖 Chatbot:** {text}")
+
+    # --- PATCH: form để Enter = gửi, và clear sau khi gửi ---
+    st.markdown("---")
+    with st.form("chat_form", clear_on_submit=True):
+        user_text = st.text_input(
+            "Nhập câu hỏi…",
+            key="chat_input",
+            placeholder="Ví dụ: threshold 0.8 có ý nghĩa gì?",
+        )
+        submitted = st.form_submit_button("Gửi")
+
+    if submitted and user_text.strip():
+        # đảm bảo input đã clear
+        st.session_state.pop("chat_input", None)
+
+        st.markdown(f"**👤 Bạn:** {user_text.strip()}")
+        # Stream trả lời như cũ (sẽ render mượt nhờ placeholder bên trong stream_gemini_reply)
+        reply = stream_gemini_reply(chat, user_text.strip())
+        st.markdown(f"**🤖 Chatbot:** {reply}")
+
+
+
+
 
 # ================== Footer ==================
 st.markdown("---")

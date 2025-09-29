@@ -604,6 +604,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Analytics Dashboard",
     "📋 Transaction Builder",
     "⚡ Real-time Monitor"
+    
 ])
 
 # ================== Tab 1: Enhanced Single Transaction ==================
